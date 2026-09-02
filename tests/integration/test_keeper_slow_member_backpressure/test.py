@@ -92,6 +92,7 @@ def test_setting_is_reported(started_cluster):
     for node in NODES:
         conf = keeper_utils.send_4lw_cmd(cluster, node, cmd="conf")
         assert "slow_member_backpressure_max_uncommitted_log_entries=200" in conf
+        assert "slow_member_backpressure_no_progress_timeout_ms=5000" in conf
         # Off until an operator switches it on. Without this the tests below
         # could pass against a build where it is on by default.
         assert get_mntr_value(node, "zk_slow_member_backpressure") == 0
