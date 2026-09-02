@@ -55,25 +55,23 @@ def get_mntr_value(node, key):
     raise AssertionError(f"{key} not reported by {node.name}: {data}")
 
 
-def switch_backpressure(leader, enable):
-    """Switch it and wait until every node reports the new value.
+def switch_backpressure(send_to, enable):
+    """Switch it and wait until the leader reports the new value.
 
-    The request is forwarded to the leader and propagated from there on a
-    best-effort basis, so a peer that was busy can miss it. Re-sending is what
-    an operator is told to do in that case, so the test does the same.
+    Only the leader holds the setting; a follower asked for it forwards the
+    request and does not switch anything locally. The request can be lost if
+    the leader connection is busy, so re-send while waiting.
     """
     cmd = "bpon" if enable else "bpof"
     expected = 1 if enable else 0
     for attempt in range(30):
         if attempt % 5 == 0:
-            keeper_utils.send_4lw_cmd(cluster, leader, cmd=cmd)
-        if all(
-            get_mntr_value(node, "zk_slow_member_backpressure") == expected
-            for node in NODES
-        ):
+            keeper_utils.send_4lw_cmd(cluster, send_to, cmd=cmd)
+        leader = keeper_utils.get_leader(cluster, NODES)
+        if get_mntr_value(leader, "zk_slow_member_backpressure") == expected:
             return
         time.sleep(1)
-    raise AssertionError(f"not every node reports slow_member_backpressure={expected}")
+    raise AssertionError(f"leader does not report slow_member_backpressure={expected}")
 
 
 def wait_for_more_in_log(node, message, was, timeout=60):
@@ -99,16 +97,20 @@ def test_setting_is_reported(started_cluster):
         assert get_mntr_value(node, "zk_slow_member_backpressure") == 0
 
 
-def test_switch_reaches_every_node(started_cluster):
-    # `bpon` sent to a follower has to reach the leader, which applies it and
-    # propagates it. Only the leader's copy has any effect, but every node
-    # reports its own, which is what an operator checks.
+def test_switch_reaches_the_leader(started_cluster):
+    # `bpon` sent to a follower has to reach the leader, which is the only node
+    # that holds the setting. The followers must not start reporting it: only
+    # the leader's copy has any effect, so a follower reporting it on would
+    # tell an operator the cluster is throttled when it may not be.
     keeper_utils.wait_nodes(cluster, NODES)
     leader = keeper_utils.get_leader(cluster, NODES)
     follower = next(node for node in NODES if node != leader)
 
     try:
         switch_backpressure(follower, True)
+        for node in NODES:
+            if node != leader:
+                assert get_mntr_value(node, "zk_slow_member_backpressure") == 0
     finally:
         switch_backpressure(leader, False)
 
