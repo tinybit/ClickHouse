@@ -179,6 +179,17 @@ public:
         /// default (off) is the safe direction.
         bool enable_multi_way_keyed_merge = false;
 
+        /// At the start of the final merge, when no variant crossed the two-level conversion
+        /// thresholds during execution, convert all of them to two-level anyway if the multi-way
+        /// keyed merge could engage (see `prepareVariantsToMerge`): a query at the conversion
+        /// boundary otherwise alternates run to run between the per-bucket merge, where the
+        /// multi-way waves parallelize the heavy uniqExact states, and the single-level merge,
+        /// where they never run. Kept out of the constructor and of the plan serialization
+        /// deliberately, like `enable_multi_way_keyed_merge`: the promotion never changes
+        /// results, and a deserialized plan re-running at the default (off) is the safe
+        /// direction.
+        bool enable_two_level_promotion_for_parallel_merge = false;
+
         /// Merge the per-thread single-level hash tables in parallel, partitioned by the key hash,
         /// instead of the serial merge.
         bool enable_parallel_single_level_merge = false;
@@ -444,6 +455,16 @@ public:
         size_t partition_index,
         size_t num_partitions,
         size_t max_source_table_size,
+        std::atomic<bool> & is_cancelled,
+        RuntimeDataflowStatisticsCacheUpdaterPtr updater) const;
+
+    /// Merges one bucket of two-level variants into the first variant and converts it to one
+    /// output chunk (the per-bucket unit of the two-level final merge).
+    AggregatedChunk mergeAndConvertOneBucketToChunk(
+        ManyAggregatedDataVariants & variants,
+        Arena * arena,
+        bool final,
+        Int32 bucket,
         std::atomic<bool> & is_cancelled,
         RuntimeDataflowStatisticsCacheUpdaterPtr updater) const;
 
@@ -1047,14 +1068,6 @@ private:
     requires SetAggregationMethod<Method>
     AggregatedChunk convertOneBucketToChunkTopK(
         Method & method, Arena * arena, Arenas & pools_for_output, Int32 bucket, UInt64 * full_key_bytes) const;
-
-    AggregatedChunk mergeAndConvertOneBucketToChunk(
-        ManyAggregatedDataVariants & variants,
-        Arena * arena,
-        bool final,
-        Int32 bucket,
-        std::atomic<bool> & is_cancelled,
-        RuntimeDataflowStatisticsCacheUpdaterPtr updater) const;
 
     AggregatedChunk prepareChunkAndFillWithoutKey(AggregatedDataVariants & data_variants, bool final, bool is_overflows) const;
     AggregatedChunks prepareChunksAndFillTwoLevel(AggregatedDataVariants & data_variants, bool final) const;
